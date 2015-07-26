@@ -138,9 +138,17 @@ class Resque_Worker
 			$hostname = gethostname();
 		}
 		else {
+			// php_uname — 返回运行 PHP 的系统的有关信息
+			// 'a'：此为默认。包含序列 "s n r v m" 里的所有模式。
+			// 's'：操作系统名称。例如： FreeBSD。
+			// 'n'：主机名。例如： localhost.example.com。
+			// 'r'：版本名称，例如： 5.1.2-RELEASE。
+			// 'v'：版本信息。操作系统之间有很大的不同。
+			// 'm'：机器类型。例如：i386。
 			$hostname = php_uname('n');
 		}
 		$this->hostname = $hostname;
+		// worker的ID是host + PHP进程ID + 队列的名字
 		$this->id = $this->hostname . ':'.getmypid() . ':' . implode(',', $this->queues);
 	}
 
@@ -168,6 +176,7 @@ class Resque_Worker
 				$job = $this->reserve();
 			}
 
+			// 如果没有找到job
 			if(!$job) {
 				// For an interval of 0, break now - helps with unit testing etc
 				if($interval == 0) {
@@ -181,6 +190,7 @@ class Resque_Worker
 				else {
 					$this->updateProcLine('Waiting for ' . implode(',', $this->queues));
 				}
+				// usleep — 以指定的微秒数延迟执行
 				usleep($interval * 1000000);
 				continue;
 			}
@@ -189,35 +199,46 @@ class Resque_Worker
 			Resque_Event::trigger('beforeFork', $job);
 			$this->workingOn($job);
 
+			// 在父进程中记录子进程的ID
 			$this->child = $this->fork();
 
 			// Forked and we're the child. Run the job.
 			if ($this->child === 0 || $this->child === false) {
+				// 在子进程中
 				$status = 'Processing ' . $job->queue . ' since ' . strftime('%F %T');
 				$this->updateProcLine($status);
 				$this->log($status, self::LOG_VERBOSE);
 				$this->perform($job);
 				if ($this->child === 0) {
+					// 执行完job之后，结束子进程
 					exit(0);
 				}
 			}
 
 			if($this->child > 0) {
+				// 在父进程中
 				// Parent process, sit and wait
 				$status = 'Forked ' . $this->child . ' at ' . strftime('%F %T');
 				$this->updateProcLine($status);
 				$this->log($status, self::LOG_VERBOSE);
 
 				// Wait until the child process finishes before continuing
+				// pcntl_wait — 等待或返回fork的子进程状态
+				// wait函数刮起当前进程的执行直到一个子进程退出或接收到一个信号要求中断当前进程或调用一个信号处理函数。
+				// 如果一个子进程在调用此函数时已经退出（俗称僵尸进程），此函数立刻返回。子进程使用的所有系统资源将 被释放。
+				// 关于wait在您系统上工作的详细规范请查看您系统的wait（2）手册。
 				pcntl_wait($status);
+				// pcntl_wexitstatus — 返回一个中断的子进程的返回代码
+				// 如果子进程的退出状态是0，就表示执行job完成（不管是成功还是失败）
 				$exitStatus = pcntl_wexitstatus($status);
 				if($exitStatus !== 0) {
+					// 返回其他的退出状态，同样认为job执行失败，做相应的处理
 					$job->fail(new Resque_Job_DirtyExitException(
 						'Job exited with exit code ' . $exitStatus
 					));
 				}
 			}
-
+			// 清空子进程的ID
 			$this->child = null;
 			$this->doneWorking();
 		}
@@ -234,14 +255,16 @@ class Resque_Worker
 	{
 		try {
 			Resque_Event::trigger('afterFork', $job);
+			// 执行job
 			$job->perform();
 		}
 		catch(Exception $e) {
 			$this->log($job . ' failed: ' . $e->getMessage());
+			// 执行job失败后的处理
 			$job->fail($e);
 			return;
 		}
-
+		// job的状态更新成complete
 		$job->updateStatus(Resque_Job_Status::STATUS_COMPLETE);
 		$this->log('done ' . $job);
 	}
@@ -257,6 +280,7 @@ class Resque_Worker
 		if(!is_array($queues)) {
 			return;
 		}
+		// 遍历整个所有队列中的内容，找到一个job
 		foreach($queues as $queue) {
 			$this->log('Checking ' . $queue, self::LOG_VERBOSE);
 			$job = Resque_Job::reserve($queue);
@@ -265,7 +289,7 @@ class Resque_Worker
 				return $job;
 			}
 		}
-
+		// 找不到job，返回false
 		return false;
 	}
 
@@ -293,7 +317,7 @@ class Resque_Worker
 
 	/**
 	 * Attempt to fork a child process from the parent to run a job in.
-	 *
+	 * fork一个进程去执行job
 	 * Return values are those of pcntl_fork().
 	 *
 	 * @return int -1 if the fork failed, 0 for the forked child, the PID of the child for the parent.
@@ -333,6 +357,7 @@ class Resque_Worker
 	private function updateProcLine($status)
 	{
 		if(function_exists('setproctitle')) {
+			// setproctitle — 设置PHP进程的标题
 			setproctitle('resque-' . Resque::VERSION . ': ' . $status);
 		}
 	}
@@ -350,14 +375,48 @@ class Resque_Worker
 		if(!function_exists('pcntl_signal')) {
 			return;
 		}
-
+		// Tick（时钟周期）是一个在 declare 代码段中解释器每执行 N 条可计时的低级语句就会发生的事件。
+		// N 的值是在 declare 中的 directive 部分用 ticks=N 来指定的。
+		// 不是所有语句都可计时。通常条件表达式和参数表达式都不可计时。
 		declare(ticks = 1);
+		// pcntl_signal — 安装一个信号处理器
+		// Signal     Value     Action   Comment
+		// ──────────────────────────────────────────────────────────────────────
+		// SIGHUP        1       Term    Hangup detected on controlling terminal or death of controlling process
+		// SIGINT        2       Term    Interrupt from keyboard
+		// SIGQUIT       3       Core    Quit from keyboard
+		// SIGILL        4       Core    Illegal Instruction
+		// SIGABRT       6       Core    Abort signal from abort(3)
+		// SIGFPE        8       Core    Floating point exception
+		// SIGKILL       9       Term    Kill signal
+		// SIGSEGV      11       Core    Invalid memory reference
+		// SIGPIPE      13       Term    Broken pipe: write to pipe with noreaders
+		// SIGALRM      14       Term    Timer signal from alarm(2)
+		// SIGTERM      15       Term    Termination signal
+		// SIGUSR1   30,10,16    Term    User-defined signal 1
+		// SIGUSR2   31,12,17    Term    User-defined signal 2
+		// SIGCHLD   20,17,18    Ign     Child stopped or terminated
+		// SIGCONT   19,18,25    Cont    Continue if stopped
+		// SIGSTOP   17,19,23    Stop    Stop process
+		// SIGTSTP   18,20,24    Stop    Stop typed at terminal
+		// SIGTTIN   21,21,26    Stop    Terminal input for background process
+		// SIGTTOU   22,22,27    Stop    Terminal output for background process
+		// 更多内容可以用man 7 signal命令查看
+		// Ctrl-C送SIGINT信号，默认进程会结束，但是进程自己可以重定义收到这个信号的行为。
+		// Ctrl-Z送SIGSTOP信号，进程只是被停止，再送SIGCONT信号，进程继续运行，涉及到命令有jobs，fg，bg。
+
+		// 接收到SIGTERM和SIGINT信号，woker将被标记为关闭并杀死子进程
 		pcntl_signal(SIGTERM, array($this, 'shutDownNow'));
 		pcntl_signal(SIGINT, array($this, 'shutDownNow'));
+		// 接收到SIGQUIT信号，woker将被标记为关闭
 		pcntl_signal(SIGQUIT, array($this, 'shutdown'));
+		// 接收到SIGUSR1信号，woker将杀死子进程
 		pcntl_signal(SIGUSR1, array($this, 'killChild'));
+		// 接收到SIGUSR2信号，worker将被标记为暂停
 		pcntl_signal(SIGUSR2, array($this, 'pauseProcessing'));
+		// 接收到SIGCONT信号，worker将被取消标记标记
 		pcntl_signal(SIGCONT, array($this, 'unPauseProcessing'));
+		// 接收到SIGPIPE信号，worker将重新连接Redis
 		pcntl_signal(SIGPIPE, array($this, 'reestablishRedisConnection'));
 		$this->log('Registered signals', self::LOG_VERBOSE);
 	}
@@ -367,6 +426,7 @@ class Resque_Worker
 	 */
 	public function pauseProcessing()
 	{
+		// 将worker标记为暂停
 		$this->log('USR2 received; pausing job processing');
 		$this->paused = true;
 	}
@@ -377,6 +437,7 @@ class Resque_Worker
 	 */
 	public function unPauseProcessing()
 	{
+		// 将worker的暂停标记取消
 		$this->log('CONT received; resuming job processing');
 		$this->paused = false;
 	}
@@ -387,6 +448,7 @@ class Resque_Worker
 	 */
 	public function reestablishRedisConnection()
 	{
+		// 重新连接Redis
 		$this->log('SIGPIPE received; attempting to reconnect');
 		Resque::redis()->establishConnection();
 	}
@@ -397,6 +459,7 @@ class Resque_Worker
 	 */
 	public function shutdown()
 	{
+		// 标记为关闭
 		$this->shutdown = true;
 		$this->log('Exiting...');
 	}
@@ -407,6 +470,7 @@ class Resque_Worker
 	 */
 	public function shutdownNow()
 	{
+		// 标记为关闭并杀死子进程
 		$this->shutdown();
 		$this->killChild();
 	}
@@ -423,12 +487,20 @@ class Resque_Worker
 		}
 
 		$this->log('Killing child at ' . $this->child, self::LOG_VERBOSE);
+		// exec — 执行一个外部程序
+		// 如果提供了 $output 参数， 那么会用命令执行的输出填充此数组， 每行输出填充数组中的一个元素。
+		// 数组中的数据不包含行尾的空白字符，例如 \n 字符。 请注意，如果数组中已经包含了部分元素，exec() 函数会在数组末尾追加内容。
+		// 如果你不想在数组末尾进行追加， 请在传入 exec() 函数之前 对数组使用 unset() 函数进行重置。
+		// 同时提供 $output 和 $returnCode 参数， 命令执行后的返回状态会被写入到此变量。
 		if(exec('ps -o pid,state -p ' . $this->child, $output, $returnCode) && $returnCode != 1) {
 			$this->log('Killing child at ' . $this->child, self::LOG_VERBOSE);
+			// posix_kill — 发送信号到一个进程
 			posix_kill($this->child, SIGKILL);
+			// 清空子进程ID
 			$this->child = null;
 		}
 		else {
+			// 子进程不存在，关闭
 			$this->log('Child ' . $this->child . ' not found, restarting.', self::LOG_VERBOSE);
 			$this->shutdown();
 		}
@@ -437,6 +509,7 @@ class Resque_Worker
 	/**
 	 * Look for any workers which should be running on this server and if
 	 * they're not, remove them from Redis.
+	 * 移除不在运行的worker
 	 *
 	 * This is a form of garbage collection to handle cases where the
 	 * server may have been killed and the Resque workers did not die gracefully
@@ -509,12 +582,14 @@ class Resque_Worker
 	{
 		$job->worker = $this;
 		$this->currentJob = $job;
+		// 将job的状态更新为running
 		$job->updateStatus(Resque_Job_Status::STATUS_RUNNING);
 		$data = json_encode(array(
 			'queue' => $job->queue,
 			'run_at' => strftime('%a %b %d %H:%M:%S %Z %Y'),
 			'payload' => $job->payload
 		));
+		// 设置worker的数据， worker专程字符串后是该worker的id
 		Resque::redis()->set('worker:' . $job->worker, $data);
 	}
 
@@ -548,9 +623,12 @@ class Resque_Worker
 	public function log($message)
 	{
 		if($this->logLevel == self::LOG_NORMAL) {
+			// 只打印message
 			fwrite(STDOUT, "*** " . $message . "\n");
 		}
 		else if($this->logLevel == self::LOG_VERBOSE) {
+			// 打印message和时间
+			// strftime — 根据区域设置格式化本地时间／日期
 			fwrite(STDOUT, "** [" . strftime('%T %Y-%m-%d') . "] " . $message . "\n");
 		}
 	}

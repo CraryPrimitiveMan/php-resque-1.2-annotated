@@ -8,9 +8,13 @@
  */
 class Resque_Job_Status
 {
+	//等待
 	const STATUS_WAITING = 1;
+	// 正在执行
 	const STATUS_RUNNING = 2;
+	// 失败
 	const STATUS_FAILED = 3;
+	// 结束
 	const STATUS_COMPLETE = 4;
 
 	/**
@@ -70,6 +74,7 @@ class Resque_Job_Status
 			return false;
 		}
 
+		// key 不存在，就表示没有监控该job
 		if(!Resque::redis()->exists((string)$this)) {
 			$this->isTracking = false;
 			return false;
@@ -132,7 +137,7 @@ class Resque_Job_Status
 
 	/**
 	 * Generate a string representation of this object.
-	 *
+	 * 返回拼接好的key
 	 * @return string String representation of the current job status class.
 	 */
 	public function __toString()

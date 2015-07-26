@@ -23,6 +23,7 @@ class Resque_RedisCluster extends RedisentCluster
 	/**
 	 * @var array List of all commands in Redis that supply a key as their
 	 *	first argument. Used to prefix keys with the Resque namespace.
+	 * Redis支持的命令
 	 */
 	private $keyCommands = array(
 		'exists',
@@ -83,6 +84,7 @@ class Resque_RedisCluster extends RedisentCluster
 	
 	/**
 	 * Set Redis namespace (prefix) default: resque
+	 * 设置Redis key的前缀
 	 * @param string $namespace
 	 */
 	public static function prefix($namespace)
@@ -102,8 +104,10 @@ class Resque_RedisCluster extends RedisentCluster
 	 * @return mixed Return value from Resident::call() based on the command.
 	 */
 	public function __call($name, $args) {
+		// $args[0]就是$name
 		$args = func_get_args();
 		if(in_array($name, $this->keyCommands)) {
+			// 为key拼接前缀，默认是'resque:'
 			$args[1][0] = self::$defaultNamespace . $args[1][0];
 		}
 		try {

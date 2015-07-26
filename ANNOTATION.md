@@ -81,8 +81,8 @@ Status of b1f01038e5e833d24b46271a0e31f6d6 is: 1
 * Resque_Job_Status::STATUS_RUNNING = 2; (正在执行)
 * Resque_Job_Status::STATUS_FAILED = 3; (失败)
 * Resque_Job_Status::STATUS_COMPLETE = 4; (结束)
-因为没有Worker运行，所以刚才创建的Job还是等待状态。
 
+因为没有Worker运行，所以刚才创建的Job还是等待状态。
 运行Worker
 这次我们直接编写demo/resque.php：
 ```php

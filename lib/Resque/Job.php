@@ -61,7 +61,9 @@ class Resque_Job
 				'Supplied $args must be an array.'
 			);
 		}
+		// uniqid — 生成一个唯一ID，一个带前缀、基于当前时间微秒数的唯一ID
 		$id = md5(uniqid('', true));
+		// 将相应的类名/参数和id入队
 		Resque::push($queue, array(
 			'class'	=> $class,
 			'args'	=> array($args),
@@ -69,6 +71,7 @@ class Resque_Job
 		));
 
 		if($monitor) {
+			// 创建job的状态，以便监控这个job
 			Resque_Job_Status::create($id);
 		}
 
@@ -84,11 +87,12 @@ class Resque_Job
 	 */
 	public static function reserve($queue)
 	{
+		// 出队，拿到最早的job数据
 		$payload = Resque::pop($queue);
 		if(!is_array($payload)) {
 			return false;
 		}
-
+		// 创建一个新的job
 		return new Resque_Job($queue, $payload);
 	}
 
@@ -125,6 +129,7 @@ class Resque_Job
 	 */
 	public function getArguments()
 	{
+		// 获取参数
 		if (!isset($this->payload['args'])) {
 			return array();
 		}
@@ -154,7 +159,7 @@ class Resque_Job
 				'Job class ' . $this->payload['class'] . ' does not contain a perform method.'
 			);
 		}
-
+		// 创建job的实例，并添加各种数据
 		$this->instance = new $this->payload['class']();
 		$this->instance->job = $this;
 		$this->instance->args = $this->getArguments();
@@ -178,7 +183,7 @@ class Resque_Job
 			if(method_exists($instance, 'setUp')) {
 				$instance->setUp();
 			}
-
+			// 执行job的perform方法
 			$instance->perform();
 
 			if(method_exists($instance, 'tearDown')) {
@@ -206,15 +211,17 @@ class Resque_Job
 			'exception' => $exception,
 			'job' => $this,
 		));
-
+		// job的状态更新成failed
 		$this->updateStatus(Resque_Job_Status::STATUS_FAILED);
 		require_once dirname(__FILE__) . '/Failure.php';
+		// 记录信息到failed队列中
 		Resque_Failure::create(
 			$this->payload,
 			$exception,
 			$this->worker,
 			$this->queue
 		);
+		// 失败状态的个数+1
 		Resque_Stat::incr('failed');
 		Resque_Stat::incr('failed:' . $this->worker);
 	}
