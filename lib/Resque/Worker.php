@@ -64,6 +64,8 @@ class Resque_Worker
 	 */
 	public static function all()
 	{
+		// SMEMBERS key
+		// 返回集合 key 中的所有成员。
 		$workers = Resque::redis()->smembers('workers');
 		if(!is_array($workers)) {
 			$workers = array();
@@ -71,6 +73,7 @@ class Resque_Worker
 
 		$instances = array();
 		foreach($workers as $workerId) {
+			// 分别找出workerId对应的worker实例
 			$instances[] = self::find($workerId);
 		}
 		return $instances;
@@ -84,6 +87,8 @@ class Resque_Worker
 	 */
 	public static function exists($workerId)
 	{
+		// SISMEMBER key member
+		// 判断 member 元素是否集合 key 的成员。
 		return (bool)Resque::redis()->sismember('workers', $workerId);
 	}
 
@@ -95,7 +100,8 @@ class Resque_Worker
 	 */
 	public static function find($workerId)
 	{
-	  if(!self::exists($workerId) || false === strpos($workerId, ":")) {
+		// worker不存在或者workerId中不含有：，就直接返回false
+	    if(!self::exists($workerId) || false === strpos($workerId, ":")) {
 			return false;
 		}
 
@@ -113,6 +119,7 @@ class Resque_Worker
 	 */
 	public function setId($workerId)
 	{
+		// 设置workerId
 		$this->id = $workerId;
 	}
 
@@ -341,6 +348,7 @@ class Resque_Worker
 	 */
 	private function startup()
 	{
+		// 注册相应信号的处理
 		$this->registerSigHandlers();
 		$this->pruneDeadWorkers();
 		Resque_Event::trigger('beforeFirstFork', $this);
@@ -517,17 +525,19 @@ class Resque_Worker
 	 */
 	public function pruneDeadWorkers()
 	{
+		// 获取所有的resque worker的pid
 		$workerPids = $this->workerPids();
 		$workers = self::all();
 		foreach($workers as $worker) {
-		  if (is_object($worker)) {
-  			list($host, $pid, $queues) = explode(':', (string)$worker, 3);
-  			if($host != $this->hostname || in_array($pid, $workerPids) || $pid == getmypid()) {
-  				continue;
-  			}
-  			$this->log('Pruning dead worker: ' . (string)$worker, self::LOG_VERBOSE);
-  			$worker->unregisterWorker();
-		  }
+			if (is_object($worker)) {
+				list($host, $pid, $queues) = explode(':', (string)$worker, 3);
+				if($host != $this->hostname || in_array($pid, $workerPids) || $pid == getmypid()) {
+					continue;
+				}
+				// 如果host不知当前的host或者workerId不在集合中或者workerId不等于当前进程的id，就认为是一个dead worker
+				$this->log('Pruning dead worker: ' . (string)$worker, self::LOG_VERBOSE);
+				$worker->unregisterWorker();
+			}
 		}
 	}
 
@@ -540,8 +550,10 @@ class Resque_Worker
 	public function workerPids()
 	{
 		$pids = array();
+		// 获取所有的resque worker的pid，返回结果如 ['5127 php resque.php']
 		exec('ps -A -o pid,command | grep [r]esque', $cmdOutput);
 		foreach($cmdOutput as $line) {
+			// explode 的最后一个参数限制分割后返回的个数
 			list($pids[],) = explode(' ', trim($line), 2);
 		}
 		return $pids;
@@ -552,21 +564,31 @@ class Resque_Worker
 	 */
 	public function registerWorker()
 	{
+		// 从worker的集合中移除
 		Resque::redis()->sadd('workers', $this);
+		// 记录worker开始的时间，格式是：Tue Jul 28 20:39:00 CST 2015
 		Resque::redis()->set('worker:' . (string)$this . ':started', strftime('%a %b %d %H:%M:%S %Z %Y'));
 	}
 
 	/**
 	 * Unregister this worker in Redis. (shutdown etc)
+	 * 注销掉该worker
 	 */
 	public function unregisterWorker()
 	{
 		if(is_object($this->currentJob)) {
+			// 如果还有job在，就将其标记为失败
 			$this->currentJob->fail(new Resque_Job_DirtyExitException);
 		}
 
 		$id = (string)$this;
+		// SREM key member [member ...]
+		// 移除集合 key 中的一个或多个 member 元素，不存在的 member 元素会被忽略。
+		// 当 key 不是集合类型，返回一个错误。
+		// 从worker的集合中移除
 		Resque::redis()->srem('workers', $id);
+		// 删除worker在redis中的存储，包括下面四种：
+		// worker:{workerId}/worker:{workerId}:started/stat:processed:{workerId}/stat:failed:{workerId}
 		Resque::redis()->del('worker:' . $id);
 		Resque::redis()->del('worker:' . $id . ':started');
 		Resque_Stat::clear('processed:' . $id);
@@ -586,6 +608,7 @@ class Resque_Worker
 		$job->updateStatus(Resque_Job_Status::STATUS_RUNNING);
 		$data = json_encode(array(
 			'queue' => $job->queue,
+			// 格式是：Tue Jul 28 20:39:00 CST 2015
 			'run_at' => strftime('%a %b %d %H:%M:%S %Z %Y'),
 			'payload' => $job->payload
 		));
@@ -600,8 +623,10 @@ class Resque_Worker
 	public function doneWorking()
 	{
 		$this->currentJob = null;
+		// 执行完的job数目加1
 		Resque_Stat::incr('processed');
 		Resque_Stat::incr('processed:' . (string)$this);
+		// 删除掉worker的状态
 		Resque::redis()->del('worker:' . (string)$this);
 	}
 
